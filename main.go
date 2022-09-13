@@ -3,6 +3,7 @@ package main
 import (
 	"dmap/dmap"
 	"fmt"
+	"github.com/gorilla/websocket"
 	"math/rand"
 	"os"
 	"sync"
@@ -11,10 +12,54 @@ import (
 
 var Svc *dmap.Svc
 
+type InvokeArgs struct {
+	ClientID int    `json:"cid"`
+	Name     string `json:"name"`
+}
+
+func (in *InvokeArgs) Creator() dmap.ValueCreator {
+	return func() dmap.ValueInterface {
+		return new(InvokeArgs)
+	}
+}
+func (in *InvokeArgs) TypeName() string {
+	return "InvokeArgs"
+}
+
+type InvokeStruct1 struct {
+	ID   int             `json:"id"`
+	Name string          `json:"name"`
+	Conn *websocket.Conn `json:"-"`
+}
+
+func (in *InvokeStruct1) Invoke(args dmap.ValueInterface) {
+	if in.Conn != nil {
+		fmt.Println(os.Getenv("pod"), "invoke", args)
+	} else {
+		fmt.Println(os.Getenv("pod"), "不是目标id", args)
+	}
+
+	return
+}
+
+func (in *InvokeStruct1) Creator() dmap.ValueCreator {
+	return func() dmap.ValueInterface {
+		return &InvokeStruct1{
+			ID:   0,
+			Name: "",
+			Conn: nil,
+		}
+	}
+}
+func (in *InvokeStruct1) TypeName() string {
+	return "InvokeStruct1"
+}
+
 type MyStruct1 struct {
 	ID   int       `json:"id"`
 	Name string    `json:"name"`
 	Son  MyStruct2 `json:"son"`
+	Sync bool
 }
 type MyStruct2 struct {
 	ID int `json:"id"`
@@ -23,29 +68,29 @@ type MyStruct2 struct {
 func (s1 MyStruct1) String() string {
 	return fmt.Sprintf("%d,%s,%d", s1.ID, s1.Name, s1.Son.ID)
 }
-func (s1 MyStruct1) C() dmap.ValueCreator {
+func (s1 MyStruct1) Creator() dmap.ValueCreator {
 	return func() dmap.ValueInterface {
 		return new(MyStruct1)
 	}
 }
-func (s1 MyStruct1) T() string {
+func (s1 MyStruct1) TypeName() string {
 	return "MyStruct1"
 }
 
 type DInt int
 
-func (i DInt) C() dmap.ValueCreator {
+func (i DInt) Creator() dmap.ValueCreator {
 	return func() dmap.ValueInterface {
 		return new(DInt)
 	}
 }
-func (i DInt) T() string {
+func (i DInt) TypeName() string {
 	return "DInt"
 }
 
 func main() {
 	dmap.Test()
-	dmap.RegStruct([]dmap.ValueInterface{new(DInt), new(MyStruct1)})
+	dmap.RegStruct([]dmap.ValueInterface{new(DInt), new(MyStruct1), new(InvokeStruct1), new(InvokeArgs)})
 	//p := os.Args[0]
 	var p string
 	if len(os.Args) == 2 {
@@ -68,43 +113,68 @@ func a() {
 
 	//m1 := dmap.New("m1")
 	//m1.Store("k0", DInt(111))
-	m1 := dmap.New("m2")
-	m1.Store("k0", MyStruct1{
-		ID:   1,
-		Name: "name_1",
-		Son: MyStruct2{
-			ID: 100,
-		},
-	})
+	//m1 := dmap.New("m2")
+	//m1.Store("k0", MyStruct1{
+	//	ID:   1,
+	//	Name: "name_1",
+	//	Sync: true,
+	//	Son: MyStruct2{
+	//		ID: 100,
+	//	},
+	//})
+
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("wss://broadcast-backend.test.gotin.top/live/rtc/forum/0e99fb6d-d31d-4e20-8145-c36328053330/d0386c19-c9bd-42de-a3fc-45ab4fe22af5/0e99fb6d-d31d-4e20-8145-c36328053330/e513eac4-1b6d-44de-88f0-6a65f6bf33ee/8022"), nil)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	m1 := dmap.New("a")
+	v1 := &InvokeStruct1{
+		ID:   0,
+		Name: "name_0",
+		Conn: conn,
+	}
+	m1.Store("k0", v1)
+	//m1.Invoke("k0", InvokeArgs{
+	//	ID:   11111,
+	//	Name: "11111",
+	//})
 
 	var ki = 1
-	t := time.NewTicker(1000 * time.Millisecond)
+	t := time.NewTicker(3000 * time.Millisecond)
 	t1 := time.NewTicker(3 * time.Second)
 	go func() {
 		defer wg.Done()
 		for {
 			select {
 			case <-t1.C:
-				Svc.RangeMap(func(k, v interface{}) bool {
-					var m = make(map[string]interface{})
-					v.(*dmap.Dmap).Range(func(key, value interface{}) bool {
-						m[key.(string)] = value
-						return true
-					})
-					fmt.Println("节点a的", k, "的所有元素", len(m))
-					return true
-				})
+				//Svc.RangeMap(func(k, v interface{}) bool {
+				//	var m = make(map[string]interface{})
+				//	v.(*dmap.Dmap).Range(func(key, value interface{}) bool {
+				//		m[key.(string)] = value
+				//		return true
+				//	})
+				//	fmt.Println("节点a的", k, "的所有元素", len(m))
+				//	return true
+				//})
 
 			case <-t.C:
 				i := rand.Intn(100)
-				if i%1 == 0 {
+				if i%20 == 0 {
 					k := fmt.Sprintf("k%d", ki)
-					m1.Store(k, MyStruct1{
+					//m1.Store(k, MyStruct1{
+					//	ID:   ki,
+					//	Name: fmt.Sprintf("name_%d", ki),
+					//	Sync: true,
+					//	Son: MyStruct2{
+					//		ID: 100,
+					//	},
+					//})
+					m1.Store(k, &InvokeStruct1{
 						ID:   ki,
 						Name: fmt.Sprintf("name_%d", ki),
-						Son: MyStruct2{
-							ID: 100,
-						},
+						Conn: conn,
 					})
 					fmt.Println("新增key ", k)
 					ki++
@@ -114,14 +184,19 @@ func a() {
 						rk = rand.Intn(ki)
 					}
 					k := fmt.Sprintf("k%d", rk)
-					if od, ok := m1.Load(k); ok {
-						v := od.(MyStruct1)
-						v.Name = v.Name + "0"
-						m1.Store(k, v)
-						//fmt.Println("更新key", k, v)
-					} else {
-						fmt.Println("更新未找到key", k)
-					}
+					m1.Invoke(k, &InvokeArgs{
+						ClientID: rk,
+						Name:     "aaaaa",
+					})
+					//if od, ok := m1.Load(k); ok {
+					//	//v := od.(InvokeStruct1)
+					//
+					//	//v.Name = v.Name + "0"
+					//	//m1.Store(k, v)
+					//	//fmt.Println("更新key", k, v)
+					//} else {
+					//	fmt.Println("更新未找到key", k)
+					//}
 
 				}
 
@@ -139,10 +214,10 @@ func b() {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
-	m1 := dmap.New("m3")
-	m1.Store("k0", DInt(1))
+	//m1 := dmap.New("b")
+	//m1.Store("k0", DInt(1))
 	//ki := 1
-	t := time.NewTicker(1 * time.Second)
+	t := time.NewTicker(3 * time.Second)
 	go func() {
 		defer wg.Done()
 		for {
@@ -158,7 +233,13 @@ func b() {
 					return true
 				})
 			case <-t.C:
-				i := rand.Intn(10) + 5
+				if m, ok := Svc.GetDmap("a"); ok {
+					m.Invoke("k0", &InvokeArgs{
+						ClientID: 0,
+						Name:     "bbbbb",
+					})
+				}
+				//i := rand.Intn(10) + 5
 				//if i%2 == 0 {
 				//	k := fmt.Sprintf("k%d", ki)
 				//	m1.Store(k, strconv.Itoa(ki))
@@ -177,7 +258,7 @@ func b() {
 				//
 				//}
 
-				t.Reset(time.Duration(i) * time.Second)
+				//t.Reset(time.Duration(i) * time.Second)
 			case <-time.After(60 * time.Second):
 				return
 			}

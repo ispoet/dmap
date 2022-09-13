@@ -5,23 +5,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-redis/redis/v9"
+	"os"
 	"strconv"
 	"time"
 )
 
 type sDataT struct {
 	T string `json:"t"`
+	P string `json:"p"`
 }
 type sData struct {
 	sDataT
-	Del bool           `json:"del"`
+	Act string         `json:"act"`
 	Dk  string         `json:"dk"`
 	K   string         `json:"k"`
 	V   ValueInterface `json:"v"`
 }
 
 func syncEncode(s *sData) []byte {
-	s.T = s.V.T()
+	if s.V != nil {
+		s.T = s.V.TypeName()
+	}
+	s.P = os.Getenv("pod")
 	en, _ := json.Marshal(s)
 	return en
 }
@@ -40,7 +45,7 @@ func syncDecode(data []byte) *sData {
 
 type Adapter interface {
 	listen(func(*sData))
-	broadcast(bool, string, string, ValueInterface) error
+	broadcast(string, string, string, ValueInterface) error
 	stop()
 }
 
@@ -98,12 +103,16 @@ func (r *RedisAdapter) election() (channel string) {
 	ctx := context.Background()
 
 	setNX := r.client.SetNX(ctx, r.electionKey, channel, time.Duration(r.conf.Redis.SyncExpireTime)*time.Second)
+	setKey := func(c string) {
+		r.streamKey = fmt.Sprintf("%s-dmap-%s-stream-%s", r.conf.Redis.Prefix, r.conf.s, c)
+	}
 	if setNX.Val() {
-		r.streamKey = fmt.Sprintf("%s-dmap-%s-stream-%s", r.conf.Redis.Prefix, r.conf.s, channel)
+		setKey(channel)
 		r.expireStreamKey()
 		return
 	}
 	channel = r.client.Get(ctx, r.electionKey).Val()
+	setKey(channel)
 	return
 }
 func (r *RedisAdapter) expireStreamKey() {
@@ -127,7 +136,7 @@ func (r *RedisAdapter) expireStreamKey() {
 	}()
 }
 
-func (r *RedisAdapter) broadcast(del bool, dk, k string, v ValueInterface) (err error) {
+func (r *RedisAdapter) broadcast(act, dk, k string, v ValueInterface) (err error) {
 	ctx := context.Background()
 	args := &redis.XAddArgs{}
 	args.ID = "*"
@@ -135,7 +144,7 @@ func (r *RedisAdapter) broadcast(del bool, dk, k string, v ValueInterface) (err 
 	args.MaxLen = r.conf.Redis.StreamMaxLen
 	args.Approx = true
 	args.Values = map[string]interface{}{
-		"data": syncEncode(&sData{Del: del, Dk: dk, K: k, V: v}),
+		"data": syncEncode(&sData{Act: act, Dk: dk, K: k, V: v}),
 	}
 	var sid string
 	sid, err = r.client.XAdd(ctx, args).Result()
