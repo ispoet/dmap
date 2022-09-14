@@ -1,4 +1,4 @@
-module dmap
+module github.com/ispoet/dmap
 
 go 1.19
 
