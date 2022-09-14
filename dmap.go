@@ -9,10 +9,6 @@ import (
 	"syscall"
 )
 
-func Test() {
-	fmt.Println(1)
-}
-
 var (
 	svcOnce sync.Once
 	svc     *Svc
@@ -130,18 +126,19 @@ func (s *Svc) syncDmap(data *sData) {
 	od, ok := svc.GetDmap(data.Dk)
 	if ok {
 		if os.Getenv("pod") == data.P {
+			fmt.Println("same pod continue")
 			return
 		}
 	}
 	switch data.Act {
-	case "del":
+	case syncActDel:
 		od.OnlyDelete(data.K)
-	case "store":
+	case syncActStore:
 		if !ok {
 			od = New(data.Dk)
 		}
 		od.OnlyStore(data.K, data.V)
-	case "invoke":
+	case syncActInvoke:
 		if m, ok := od.Load(data.K); ok {
 			in := m.(InvokeInterface)
 			args := data.V.(ValueInterface)
@@ -149,17 +146,6 @@ func (s *Svc) syncDmap(data *sData) {
 		}
 
 	}
-	//if od, ok := svc.GetDmap(data.Dk); ok {
-	//	if data.Del {
-	//		od.OnlyDelete(data.K)
-	//	} else {
-	//		od.OnlyStore(data.K, data.V)
-	//	}
-	//} else {
-	//	if !data.Del {
-	//		New(data.Dk).OnlyStore(data.K, data.V)
-	//	}
-	//}
 	return
 }
 
@@ -199,7 +185,7 @@ func (d *Dmap) Load(k string) (v interface{}, ok bool) {
 	return d.m.Load(k)
 }
 func (d *Dmap) Store(k string, v ValueInterface) {
-	svc.sync("store", d.k, k, v, func() {
+	svc.sync(syncActStore, d.k, k, v, func() {
 		d.OnlyStore(k, v)
 	})
 }
@@ -212,7 +198,7 @@ func (d *Dmap) LoadOrStore(k string, v ValueInterface) (interface{}, bool) {
 }
 
 func (d *Dmap) Delete(k string) {
-	svc.sync("del", d.k, k, nil, func() {
+	svc.sync(syncActDel, d.k, k, nil, func() {
 		d.OnlyDelete(k)
 	})
 	return
@@ -220,7 +206,7 @@ func (d *Dmap) Delete(k string) {
 func (d *Dmap) Invoke(k string, args ValueInterface) {
 	if v, ok := d.Load(k); ok {
 		in := v.(InvokeInterface)
-		svc.sync("invoke", d.k, k, args, func() {
+		svc.sync(syncActInvoke, d.k, k, args, func() {
 			in.Invoke(args)
 		})
 	}

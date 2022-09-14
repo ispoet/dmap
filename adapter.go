@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+const (
+	syncActDel    = "d"
+	syncActInvoke = "i"
+	syncActStore  = "s"
+)
+
 type sDataT struct {
 	T string `json:"t"`
 	P string `json:"p"`
@@ -188,7 +194,6 @@ func (r *RedisAdapter) listen(handler func(*sData)) {
 			retreat = 1
 			for i := range res {
 				for _, message := range res[i].Messages {
-					//fmt.Println("get message ", message)
 					iteration = message.ID
 					data, ok := message.Values["data"].(string)
 					if !ok {
