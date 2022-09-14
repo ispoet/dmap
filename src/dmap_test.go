@@ -1,24 +1,24 @@
-package main
+package dmap
 
 import (
-	"dmap/dmap"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"math/rand"
 	"os"
 	"sync"
+	"testing"
 	"time"
 )
 
-var Svc *dmap.Svc
+var dmapSvc *Svc
 
 type InvokeArgs struct {
 	ClientID int    `json:"cid"`
 	Name     string `json:"name"`
 }
 
-func (in *InvokeArgs) Creator() dmap.ValueCreator {
-	return func() dmap.ValueInterface {
+func (in *InvokeArgs) Creator() ValueCreator {
+	return func() ValueInterface {
 		return new(InvokeArgs)
 	}
 }
@@ -32,7 +32,7 @@ type InvokeStruct1 struct {
 	Conn *websocket.Conn `json:"-"`
 }
 
-func (in *InvokeStruct1) Invoke(args dmap.ValueInterface) {
+func (in *InvokeStruct1) Invoke(args ValueInterface) {
 	if in.Conn != nil {
 		fmt.Println(os.Getenv("pod"), "invoke", args)
 	} else {
@@ -42,8 +42,8 @@ func (in *InvokeStruct1) Invoke(args dmap.ValueInterface) {
 	return
 }
 
-func (in *InvokeStruct1) Creator() dmap.ValueCreator {
-	return func() dmap.ValueInterface {
+func (in *InvokeStruct1) Creator() ValueCreator {
+	return func() ValueInterface {
 		return &InvokeStruct1{
 			ID:   0,
 			Name: "",
@@ -68,8 +68,8 @@ type MyStruct2 struct {
 func (s1 MyStruct1) String() string {
 	return fmt.Sprintf("%d,%s,%d", s1.ID, s1.Name, s1.Son.ID)
 }
-func (s1 MyStruct1) Creator() dmap.ValueCreator {
-	return func() dmap.ValueInterface {
+func (s1 MyStruct1) Creator() ValueCreator {
+	return func() ValueInterface {
 		return new(MyStruct1)
 	}
 }
@@ -79,8 +79,8 @@ func (s1 MyStruct1) TypeName() string {
 
 type DInt int
 
-func (i DInt) Creator() dmap.ValueCreator {
-	return func() dmap.ValueInterface {
+func (i DInt) Creator() ValueCreator {
+	return func() ValueInterface {
 		return new(DInt)
 	}
 }
@@ -88,15 +88,15 @@ func (i DInt) TypeName() string {
 	return "DInt"
 }
 
-func main() {
-	dmap.Test()
-	dmap.RegStruct([]dmap.ValueInterface{new(DInt), new(MyStruct1), new(InvokeStruct1), new(InvokeArgs)})
+func TestDmap(t *testing.T) {
+	Test()
+	RegStruct([]ValueInterface{new(DInt), new(MyStruct1), new(InvokeStruct1), new(InvokeArgs)})
 	//p := os.Args[0]
 	var p string
 	if len(os.Args) == 2 {
 		p = os.Args[1]
 	}
-	Svc = dmap.Config("test", &dmap.ConfRedis{
+	dmapSvc = Config("test", &ConfRedis{
 		Addr:   fmt.Sprintf("%s:%s", "127.0.0.1", "6379"),
 		Prefix: "my_map",
 	}).NewSvc()
@@ -129,7 +129,7 @@ func a() {
 		return
 	}
 
-	m1 := dmap.New("a")
+	m1 := New("a")
 	v1 := &InvokeStruct1{
 		ID:   0,
 		Name: "name_0",
@@ -217,15 +217,15 @@ func b() {
 	//m1 := dmap.New("b")
 	//m1.Store("k0", DInt(1))
 	//ki := 1
-	t := time.NewTicker(3 * time.Second)
+	t := time.NewTicker(1 * time.Second)
 	go func() {
 		defer wg.Done()
 		for {
 			select {
 			case <-time.NewTicker(3 * time.Second).C:
-				Svc.RangeMap(func(k, v interface{}) bool {
+				dmapSvc.RangeMap(func(k, v interface{}) bool {
 					var m = make(map[string]interface{})
-					v.(*dmap.Dmap).Range(func(key, value interface{}) bool {
+					v.(*Dmap).Range(func(key, value interface{}) bool {
 						m[key.(string)] = value
 						return true
 					})
@@ -233,7 +233,7 @@ func b() {
 					return true
 				})
 			case <-t.C:
-				if m, ok := Svc.GetDmap("a"); ok {
+				if m, ok := dmapSvc.GetDmap("a"); ok {
 					m.Invoke("k0", &InvokeArgs{
 						ClientID: 0,
 						Name:     "bbbbb",
@@ -259,7 +259,7 @@ func b() {
 				//}
 
 				//t.Reset(time.Duration(i) * time.Second)
-			case <-time.After(60 * time.Second):
+			case <-time.After(10 * time.Second):
 				return
 			}
 		}
