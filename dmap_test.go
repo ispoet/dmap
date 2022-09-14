@@ -123,7 +123,7 @@ func a() {
 	//	},
 	//})
 
-	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("wss://broadcast-backend.test.gotin.top/live/rtc/forum/0e99fb6d-d31d-4e20-8145-c36328053330/d0386c19-c9bd-42de-a3fc-45ab4fe22af5/0e99fb6d-d31d-4e20-8145-c36328053330/e513eac4-1b6d-44de-88f0-6a65f6bf33ee/8022"), nil)
+	conn, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("wss://127.0.0.1"), nil)
 	if err != nil {
 		fmt.Println(err)
 		return
