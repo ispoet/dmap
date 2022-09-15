@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-redis/redis/v9"
-	"os"
 	"strconv"
 	"time"
 )
@@ -30,9 +29,16 @@ type sData struct {
 
 func syncEncode(s *sData) []byte {
 	if s.V != nil {
-		s.T = s.V.TypeName()
+		flags := s.V.DmapFlags()
+		if len(flags) > 0 && flags[0] != "" {
+			s.T = flags[0]
+		}
+		if len(flags) > 1 && flags[1] != "" {
+			s.P = flags[1]
+		} else {
+			s.P = svc.getFlag()
+		}
 	}
-	s.P = os.Getenv("pod")
 	en, _ := json.Marshal(s)
 	return en
 }
@@ -152,12 +158,12 @@ func (r *RedisAdapter) broadcast(act, dk, k string, v ValueInterface) (err error
 	args.Values = map[string]interface{}{
 		"data": syncEncode(&sData{Act: act, Dk: dk, K: k, V: v}),
 	}
-	var sid string
-	sid, err = r.client.XAdd(ctx, args).Result()
+	//var sid string
+	_, err = r.client.XAdd(ctx, args).Result()
 	if err != nil {
 		return
 	}
-	fmt.Println("Syncing to pool ", sid, dk, k, v)
+	//fmt.Println("Syncing to pool ", sid, dk, k, v)
 	return
 }
 

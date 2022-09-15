@@ -25,11 +25,13 @@ type ConfRedis struct {
 type Conf struct {
 	Redis *ConfRedis
 	s     string
+	f     string
 }
 
-func Config(s string, redis *ConfRedis) *Conf {
+func Config(s, f string, redis *ConfRedis) *Conf {
 	var conf = &Conf{
 		s: s,
+		f: f,
 	}
 	if redis != nil {
 		conf.Redis = redis
@@ -43,26 +45,26 @@ var M = make(map[string]ValueCreator)
 
 func RegStruct(vs []ValueInterface) {
 	for _, v := range vs {
-		M[v.TypeName()] = v.Creator()
+		flags := v.DmapFlags()
+		if len(flags) > 0 && flags[0] != "" {
+			M[flags[0]] = v.DmapCreator()
+		}
+
 	}
 }
-
-//type VInterface interface {
-//	ValueInterface
-//	InvokeInterface
-//}
 
 type InvokeInterface interface {
 	Invoke(ValueInterface)
 	ValueInterface
 }
 type ValueInterface interface {
-	Creator() ValueCreator
-	TypeName() string
+	DmapCreator() ValueCreator
+	DmapFlags() []string
 }
 
 type Svc struct {
 	name    string
+	flag    string
 	maps    sync.Map
 	conf    *Conf
 	channel string
@@ -74,7 +76,7 @@ type Svc struct {
 func (c *Conf) NewSvc() *Svc {
 	svcOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
-		svc = &Svc{name: c.s, maps: sync.Map{}, conf: c, ctx: ctx, cancel: cancel}
+		svc = &Svc{name: c.s, flag: c.f, maps: sync.Map{}, conf: c, ctx: ctx, cancel: cancel}
 		svc.Adapter = newAdapter(c, svc)
 		svc.validate()
 		svc.running()
@@ -102,6 +104,9 @@ func (s *Svc) listenSignal() {
 		os.Exit(int(sig.(syscall.Signal))) // second signal. Exit directly.
 	}
 }
+func (s *Svc) getFlag() string {
+	return s.flag
+}
 
 func (s *Svc) Stop() {
 	s.cancel()
@@ -125,8 +130,7 @@ func (s *Svc) syncDmap(data *sData) {
 	}
 	od, ok := svc.GetDmap(data.Dk)
 	if ok {
-		if os.Getenv("pod") == data.P {
-			fmt.Println("same pod continue")
+		if s.getFlag() == data.P {
 			return
 		}
 	}
