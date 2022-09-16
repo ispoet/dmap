@@ -9,10 +9,6 @@ import (
 	"syscall"
 )
 
-func Test() {
-	fmt.Println(1)
-}
-
 var (
 	svcOnce sync.Once
 	svc     *Svc
@@ -29,11 +25,13 @@ type ConfRedis struct {
 type Conf struct {
 	Redis *ConfRedis
 	s     string
+	f     string
 }
 
-func Config(s string, redis *ConfRedis) *Conf {
+func Config(s, f string, redis *ConfRedis) *Conf {
 	var conf = &Conf{
 		s: s,
+		f: f,
 	}
 	if redis != nil {
 		conf.Redis = redis
@@ -47,17 +45,26 @@ var M = make(map[string]ValueCreator)
 
 func RegStruct(vs []ValueInterface) {
 	for _, v := range vs {
-		M[v.T()] = v.C()
+		flags := v.DmapFlags()
+		if len(flags) > 0 && flags[0] != "" {
+			M[flags[0]] = v.DmapCreator()
+		}
+
 	}
 }
 
+type InvokeInterface interface {
+	Invoke(ValueInterface)
+	ValueInterface
+}
 type ValueInterface interface {
-	C() ValueCreator
-	T() string
+	DmapCreator() ValueCreator
+	DmapFlags() []string
 }
 
 type Svc struct {
 	name    string
+	flag    string
 	maps    sync.Map
 	conf    *Conf
 	channel string
@@ -69,7 +76,7 @@ type Svc struct {
 func (c *Conf) NewSvc() *Svc {
 	svcOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
-		svc = &Svc{name: c.s, maps: sync.Map{}, conf: c, ctx: ctx, cancel: cancel}
+		svc = &Svc{name: c.s, flag: c.f, maps: sync.Map{}, conf: c, ctx: ctx, cancel: cancel}
 		svc.Adapter = newAdapter(c, svc)
 		svc.validate()
 		svc.running()
@@ -97,14 +104,17 @@ func (s *Svc) listenSignal() {
 		os.Exit(int(sig.(syscall.Signal))) // second signal. Exit directly.
 	}
 }
+func (s *Svc) getFlag() string {
+	return s.flag
+}
 
 func (s *Svc) Stop() {
 	s.cancel()
 	fmt.Println("svc is stop ", s.name)
 }
 
-func (s *Svc) sync(dk string, k string, v ValueInterface, del bool, f func()) {
-	if err := s.broadcast(del, dk, k, v); err == nil {
+func (s *Svc) sync(act, dk string, k string, v ValueInterface, f func()) {
+	if err := s.broadcast(act, dk, k, v); err == nil {
 		f()
 	} else {
 		fmt.Println("sync error", dk, k, v, err.Error())
@@ -115,19 +125,30 @@ func (s *Svc) syncHandler(d *sData) {
 	return
 }
 func (s *Svc) syncDmap(data *sData) {
-	if data == nil || data.Dk == "" {
+	if data == nil || data.Dk == "" || data.V == nil {
 		return
 	}
-	if od, ok := svc.GetDmap(data.Dk); ok {
-		if data.Del {
-			od.OnlyDelete(data.K)
-		} else {
-			od.OnlyStore(data.K, data.V)
+	od, ok := svc.GetDmap(data.Dk)
+	if ok {
+		if s.getFlag() == data.P {
+			return
 		}
-	} else {
-		if !data.Del {
-			New(data.Dk).OnlyStore(data.K, data.V)
+	}
+	switch data.Act {
+	case syncActDel:
+		od.OnlyDelete(data.K)
+	case syncActStore:
+		if !ok {
+			od = New(data.Dk)
 		}
+		od.OnlyStore(data.K, data.V)
+	case syncActInvoke:
+		if m, ok := od.Load(data.K); ok {
+			in := m.(InvokeInterface)
+			args := data.V.(ValueInterface)
+			in.Invoke(args)
+		}
+
 	}
 	return
 }
@@ -168,7 +189,7 @@ func (d *Dmap) Load(k string) (v interface{}, ok bool) {
 	return d.m.Load(k)
 }
 func (d *Dmap) Store(k string, v ValueInterface) {
-	svc.sync(d.k, k, v, false, func() {
+	svc.sync(syncActStore, d.k, k, v, func() {
 		d.OnlyStore(k, v)
 	})
 }
@@ -181,12 +202,21 @@ func (d *Dmap) LoadOrStore(k string, v ValueInterface) (interface{}, bool) {
 }
 
 func (d *Dmap) Delete(k string) {
-	svc.sync(d.k, k, nil, true, func() {
+	svc.sync(syncActDel, d.k, k, nil, func() {
 		d.OnlyDelete(k)
 	})
 	return
 }
+func (d *Dmap) Invoke(k string, args ValueInterface) {
+	if v, ok := d.Load(k); ok {
+		in := v.(InvokeInterface)
+		svc.sync(syncActInvoke, d.k, k, args, func() {
+			in.Invoke(args)
+		})
+	}
 
+	return
+}
 func (d *Dmap) Range(f func(key, value interface{}) (shouldContinue bool)) {
 	d.m.Range(f)
 	return
