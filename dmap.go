@@ -41,22 +41,27 @@ func Config(s, f string, redis *ConfRedis) *Conf {
 
 type ValueCreator func() ValueInterface
 
-var M = make(map[string]ValueCreator)
+var creatorFactory = make(map[string]ValueCreator)
 
 func RegStruct(vs []ValueInterface) {
 	for _, v := range vs {
 		flags := v.DmapFlags()
 		if len(flags) > 0 && flags[0] != "" {
-			M[flags[0]] = v.DmapCreator()
+			creatorFactory[flags[0]] = v.DmapCreator()
 		}
-
 	}
 }
 
+type InterceptorValueInterface interface {
+	ValueInterface
+	Before()
+	After()
+}
 type InvokeInterface interface {
 	Invoke(ValueInterface)
 	ValueInterface
 }
+
 type ValueInterface interface {
 	DmapCreator() ValueCreator
 	DmapFlags() []string
@@ -128,20 +133,44 @@ func (s *Svc) syncDmap(data *sData) {
 	if data == nil || data.Dk == "" || data.V == nil {
 		return
 	}
+
 	od, ok := svc.GetDmap(data.Dk)
 	if ok {
 		if s.getFlag() == data.P {
 			return
 		}
+		if m, y := od.Load(data.K); y {
+			switch m.(type) {
+			case InterceptorValueInterface:
+
+			}
+		}
 	}
+	iviFunc := func(data *sData, f func()) {
+		if m, ok := od.Load(data.K); ok {
+			if ivi, yes := m.(InterceptorValueInterface); yes {
+				ivi.Before()
+				f()
+				ivi.After()
+				return
+			}
+			f()
+		}
+	}
+
 	switch data.Act {
 	case syncActDel:
-		od.OnlyDelete(data.K)
+		iviFunc(data, func() {
+			od.OnlyDelete(data.K)
+		})
+
 	case syncActStore:
 		if !ok {
 			od = New(data.Dk)
 		}
-		od.OnlyStore(data.K, data.V)
+		iviFunc(data, func() {
+			od.OnlyStore(data.K, data.V)
+		})
 	case syncActInvoke:
 		if m, ok := od.Load(data.K); ok {
 			in := m.(InvokeInterface)
@@ -182,11 +211,17 @@ func (d *Dmap) OnlyDelete(k string) {
 	d.m.Delete(k)
 	return
 }
-func (d *Dmap) OnlyStore(k string, v interface{}) {
+func (d *Dmap) OnlyStore(k string, v ValueInterface) {
 	d.m.Store(k, v)
 }
-func (d *Dmap) Load(k string) (v interface{}, ok bool) {
-	return d.m.Load(k)
+func (d *Dmap) Load(k string) (v ValueInterface, ok bool) {
+	if _v, isLoad := d.m.Load(k); isLoad {
+		if __v, isValue := _v.(ValueInterface); isValue {
+			v = __v
+			ok = true
+		}
+	}
+	return
 }
 func (d *Dmap) Store(k string, v ValueInterface) {
 	svc.sync(syncActStore, d.k, k, v, func() {
@@ -202,19 +237,22 @@ func (d *Dmap) LoadOrStore(k string, v ValueInterface) (interface{}, bool) {
 }
 
 func (d *Dmap) Delete(k string) {
-	svc.sync(syncActDel, d.k, k, nil, func() {
-		d.OnlyDelete(k)
-	})
+	if v, ok := d.Load(k); ok {
+		svc.sync(syncActDel, d.k, k, v, func() {
+			d.OnlyDelete(k)
+		})
+	}
+
 	return
 }
 func (d *Dmap) Invoke(k string, args ValueInterface) {
 	if v, ok := d.Load(k); ok {
-		in := v.(InvokeInterface)
-		svc.sync(syncActInvoke, d.k, k, args, func() {
-			in.Invoke(args)
-		})
+		if in, isInvoke := v.(InvokeInterface); isInvoke {
+			svc.sync(syncActInvoke, d.k, k, args, func() {
+				in.Invoke(args)
+			})
+		}
 	}
-
 	return
 }
 func (d *Dmap) Range(f func(key, value interface{}) (shouldContinue bool)) {
