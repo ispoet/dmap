@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/go-redis/redis/v9"
 	"strconv"
 	"time"
+
+	"github.com/go-redis/redis/v9"
 )
 
 const (
@@ -27,7 +28,7 @@ type sData struct {
 	V   ValueInterface `json:"v"`
 }
 
-func syncEncode(s *sData) []byte {
+func syncEncode(s *sData) ([]byte, error) {
 	if s.V != nil {
 		flags := s.V.DmapFlags()
 		if len(flags) > 0 && flags[0] != "" {
@@ -39,15 +40,18 @@ func syncEncode(s *sData) []byte {
 			s.P = svc.getFlag()
 		}
 	}
-	en, _ := json.Marshal(s)
-	return en
+	en, err := json.Marshal(s)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+	return en, err
 }
 
 func syncDecode(data []byte) *sData {
 	var t sDataT
 	var syncData = &sData{}
 	_ = json.Unmarshal(data, &t)
-	if f, ok := M[t.T]; ok {
+	if f, ok := creatorFactory[t.T]; ok {
 		syncData.V = f()
 		_ = json.Unmarshal(data, &syncData)
 		return syncData
@@ -149,6 +153,10 @@ func (r *RedisAdapter) expireStreamKey() {
 }
 
 func (r *RedisAdapter) broadcast(act, dk, k string, v ValueInterface) (err error) {
+	en, enErr := syncEncode(&sData{Act: act, Dk: dk, K: k, V: v})
+	if enErr != nil {
+		return enErr
+	}
 	ctx := context.Background()
 	args := &redis.XAddArgs{}
 	args.ID = "*"
@@ -156,7 +164,7 @@ func (r *RedisAdapter) broadcast(act, dk, k string, v ValueInterface) (err error
 	args.MaxLen = r.conf.Redis.StreamMaxLen
 	args.Approx = true
 	args.Values = map[string]interface{}{
-		"data": syncEncode(&sData{Act: act, Dk: dk, K: k, V: v}),
+		"data": en,
 	}
 	//var sid string
 	_, err = r.client.XAdd(ctx, args).Result()
